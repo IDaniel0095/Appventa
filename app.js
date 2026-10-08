@@ -16,8 +16,8 @@ const stock=p=>p.lots.reduce((a,l)=>a+l.qty,0);
 const unit=p=>(p.lots.find(l=>l.qty>0)||p.lots[p.lots.length-1]).cost; // costo del lote activo (FIFO)
 function fifo(p,n,commit){let c=0;for(const l of p.lots){if(n<=0)break;const t=Math.min(l.qty,n);c+=t*l.cost;n-=t;if(commit)l.qty-=t}return c}
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2000)}
-const sheet=h=>{$('#sheet').innerHTML=h;$('#modal').classList.remove('hidden')};
-const close=()=>$('#modal').classList.add('hidden');
+const sheet=h=>{$('#sheet').innerHTML=h;$('#modal').classList.remove('hidden');document.body.style.overflow='hidden'};
+const close=()=>{$('#modal').classList.add('hidden');document.body.style.overflow=''};
 const PEN='<svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>';
 
 /* ---------- Editor de descuentos (etiquetas) ---------- */
