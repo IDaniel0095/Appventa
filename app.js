@@ -65,7 +65,9 @@ function cfg(){const g=S.sales.reduce((a,s)=>a+s.profit,0);return `<h1>✨ Ajust
 <label>Tema</label><div class="seg"><button data-a="th" data-v="light" class="${S.cfg.theme=='light'?'on':''}">Claro</button><button data-a="th" data-v="dark" class="${S.cfg.theme=='dark'?'on':''}">Oscuro</button></div>
 <label>Color de acento</label>${COL.map(c=>`<button class="sw ${S.cfg.ac==c?'on':''}" style="background:${c}" data-a="ac" data-v="${c}"></button>`).join('')}</div>
 <div class="card"><b>☁️ Nube (Firebase)</b><p class="mut">${fdb?'Sincronización automática activada: tus cambios se guardan solos en la nube cuando hay internet, y en un celular nuevo los datos se descargan al abrir la app.':'Firebase no configurado: completa firebaseConfig en index.html.'}</p><p class="mut">Un respaldo con fecha es una copia que puedes restaurar cuando quieras, como una máquina del tiempo.</p><button class="btn sec" data-a="cloud">Crear respaldo con fecha</button><button class="btn" data-a="restore">Restaurar un respaldo anterior</button></div>
-<div class="card"><b>Datos</b><button class="btn" data-a="csv">Exportar a Excel (.csv)</button><button class="btn sec" data-a="bk">Exportar Base de Datos (.json)</button><button class="btn sec" data-a="imp">Importar Base de Datos</button><input type="file" id="f" accept=".json,application/json"></div>`}
+<div class="card"><b>Datos</b><button class="btn" data-a="excel">Exportar a Excel (.xlsx)</button><button class="btn sec" data-a="bk">Exportar Base de Datos (.json)</button><button class="btn sec" data-a="imp">Importar Base de Datos</button><input type="file" id="f" accept=".json,application/json"></div>`}
+
+
 function render(){
   document.body.dataset.theme=S.cfg.theme;
   document.documentElement.style.setProperty('--ac',S.cfg.ac);
@@ -236,10 +238,75 @@ delSale(v){
     p.discs=[...D.rs];Object.assign(p,lread('rs'));
     save();render();toast('Producto reabastecido');
   },
-  csv(){
-    const a=[['INVENTARIO'],['Producto','Etiqueta','Stock','Costo actual','Descuentos %','Notas']].concat(S.products.map(p=>[p.name,p.tag+(p.lender?' - '+p.lender:''),stock(p),unit(p),p.discs.join('/'),p.notes]));
-    const b=[[],['VENTAS'],['Fecha','Producto','Cant','Precio final c/u','Total','Costo','Ganancia','Tipo','Cliente','WhatsApp','Fecha compromiso','Pagado']].concat(S.sales.map(s=>[s.date.slice(0,10),s.name,s.qty,s.price,s.total,s.cost,s.profit,s.type,s.client,s.phone,s.due,s.paid?'Sí':'No']));
-    dl('inventario-'+today()+'.csv','\ufeff'+csv(a.concat(b)),'text/csv');
+async excel() {
+    if (typeof ExcelJS === 'undefined') {
+      return toast('Cargando librería de Excel, intenta de nuevo...');
+    }
+    toast('Generando Excel...');
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Inventario y Ventas');
+
+    // --- SECCIÓN INVENTARIO ---
+    ws.addRow(['INVENTARIO DE PRODUCTOS']);
+    const invHeader = ws.addRow(['Producto', 'Etiqueta', 'Stock', 'Costo actual', 'Descuentos %', 'Notas']);
+    
+    // Estilos para cabecera de Inventario (Fondo azul claro)
+    invHeader.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB4C6E7' } }; // Azul claro
+      cell.font = { bold: true };
+      cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+    });
+
+    S.products.forEach(p => {
+      ws.addRow([p.name, p.tag + (p.lender ? ' - ' + p.lender : ''), stock(p), unit(p), p.discs.join('/'), p.notes]);
+    });
+
+    ws.addRow([]); // Fila vacía para separar
+
+    // --- SECCIÓN VENTAS ---
+    ws.addRow(['VENTAS REGISTRADAS']);
+    // Aquí está el orden de columnas que pediste
+    const ventHeader = ws.addRow(['Fecha', 'Producto', 'Cant', 'Costo', 'Precio final c/u', 'Descuento %', 'Total', 'Ganancia', 'Tipo', 'Cliente', 'WhatsApp', 'Fecha compromiso', 'Pagado']);
+    
+    // Estilos para cabecera de Ventas (Fondo rosa claro)
+    ventHeader.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } }; // Rosa claro
+      cell.font = { bold: true };
+      cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+    });
+
+    S.sales.forEach(s => {
+      let descAplicado = 0;
+      if (s.price < s.cost && s.cost > 0) {
+        descAplicado = ((s.cost - s.price) / s.cost) * 100;
+      }
+      ws.addRow([
+        s.date.slice(0, 10), s.name, s.qty, s.cost, s.price, 
+        descAplicado.toFixed(2), s.total, s.profit, s.type, 
+        s.client, s.phone, s.due, s.paid ? 'Sí' : 'No'
+      ]);
+    });
+
+    // Ajustar ancho de columnas automáticamente
+    ws.columns.forEach(column => {
+      let maxLen = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        const len = cell.value ? cell.value.toString().length : 0;
+        if (len > maxLen) maxLen = len;
+      });
+      column.width = maxLen < 10 ? 10 : maxLen + 2;
+    });
+
+    // Descargar el archivo
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inventario-' + today() + '.xlsx';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   bk(){dl('respaldo-inventario-'+today()+'.json',JSON.stringify({...localStorage}),'application/json')},
   imp(){$('#f').click()},
