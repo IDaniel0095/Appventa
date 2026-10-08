@@ -119,6 +119,7 @@ function importDB(f){
 const STORE='mi_inventario_principal'; // nodo fijo: tiendas/mi_inventario_principal/
 const PK='inv_pwa_linked'; // este celular ya está vinculado a la nube
 let pulling=false,fdb=null;
+let lastPushTime = 0;
 try{if(window.firebase&&firebaseConfig.databaseURL){firebase.initializeApp(firebaseConfig);fdb=firebase.database()}}catch(e){}
 const sref=p=>fdb.ref('tiendas/'+STORE+'/'+p);
 const arr=x=>Array.isArray(x)?x:Object.values(x||{}); // Firebase omite arrays vacíos y a veces devuelve objetos
@@ -140,12 +141,31 @@ function pull(){ // celular nuevo: descarga "actual" (sin preguntar); si la nube
     else syncToFirebase();
   }).catch(()=>{pulling=false});
 }
-function syncToFirebase(){ // autoguardado silencioso: sobrescribe tiendas/mi_inventario_principal/actual
+function syncToFirebase(){ 
   if(!fdb||!navigator.onLine||pulling)return;
-  if(!localStorage.getItem(PK))return pull(); // primero descargar, nunca pisar la nube con datos vacíos
+  if(!localStorage.getItem(PK))return pull(); 
   const d=localStorage.getItem(K);if(!d)return;
-  try{sref('actual').set({data:JSON.parse(d),t:Date.now()}).catch(()=>{})}catch(e){}
+  try{
+    lastPushTime = Date.now(); // Registramos el momento del guardado
+    sref('actual').set({data:JSON.parse(d),t:lastPushTime}).catch(()=>{})
+  }catch(e){}
 }
+
+function enableRealTime() {
+  if (!fdb) return;
+  // on('value') escucha los cambios permanentemente
+  sref('actual').on('value', (sn) => {
+    const o = sn.val();
+    // Comprobamos si la nube tiene datos y si el cambio lo hizo OTRO dispositivo
+    if (o && o.data && o.t !== lastPushTime) {
+      localStorage.setItem(K, JSON.stringify(norm(o.data)));
+      S = norm(o.data);
+      render(); // Actualiza la pantalla automáticamente
+      toast('Datos actualizados desde la nube');
+    }
+  });
+}
+
 addEventListener('online',syncToFirebase);
 if(!localStorage.getItem(PK)&&localStorage.getItem(K))localStorage.setItem(PK,'1'); // celular que ya tenía datos
 if(!localStorage.getItem(K))pull(); // celular nuevo: auto-descarga
@@ -267,4 +287,5 @@ document.addEventListener('change',e=>{
 });
 
 render();
+enableRealTime();
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('service-worker.js'));
