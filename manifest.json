@@ -1,0 +1,12 @@
+{
+  "name": "Mi Inventario",
+  "short_name": "Inventario",
+  "description": "Inventario, ventas al contado y fiado, y anotaciones",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff5f9",
+  "theme_color": "#ff8fb8",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}
