@@ -64,7 +64,7 @@ function cfg(){const g=S.sales.reduce((a,s)=>a+s.profit,0);return `<h1>✨ Ajust
 <div class="card"><label>Moneda (solo cambia el símbolo, no convierte montos)</label><select data-c="1"><option value="Bs." ${S.cfg.cur=='Bs.'?'selected':''}>Bolivianos (Bs.)</option><option value="USD" ${S.cfg.cur=='USD'?'selected':''}>Dólares (USD)</option></select>
 <label>Tema</label><div class="seg"><button data-a="th" data-v="light" class="${S.cfg.theme=='light'?'on':''}">Claro</button><button data-a="th" data-v="dark" class="${S.cfg.theme=='dark'?'on':''}">Oscuro</button></div>
 <label>Color de acento</label>${COL.map(c=>`<button class="sw ${S.cfg.ac==c?'on':''}" style="background:${c}" data-a="ac" data-v="${c}"></button>`).join('')}</div>
-<div class="card"><b>☁️ Nube (Firebase)</b><p class="mut">${fdb?'Respaldo automático activado cuando hay internet.':'Firebase no configurado: completa firebaseConfig en index.html.'}</p><label>Código de respaldo (guárdalo para usarlo en otro celular)</label><input id="cid" value="${esc(CID)}"><button class="btn sec" data-a="cid">Guardar código</button><button class="btn sec" data-a="cloud">Respaldar ahora</button><button class="btn" data-a="restore">Restaurar desde la nube (Firebase)</button></div>
+<div class="card"><b>☁️ Nube (Firebase)</b><p class="mut">${!fdb?'Firebase no configurado: completa firebaseConfig en index.html.':STORE?'Sincronización automática con la tienda "'+esc(STORE)+'".':'Escribe el nombre de tu tienda para activar la nube.'}</p><label>Nombre de la Tienda (ID)</label><input id="cid" value="${esc(STORE)}" placeholder="Ej. MiBoutique" autocapitalize="off" autocomplete="off"><button class="btn sec" data-a="store">Guardar nombre</button><p class="mut" style="margin-top:10px">Usa el mismo nombre en todos tus celulares. Si la tienda ya existe, primero restaura "Estado actual".</p><button class="btn sec" data-a="cloud">Respaldar ahora</button><button class="btn" data-a="restore">Restaurar desde la nube (Firebase)</button></div>
 <div class="card"><b>Datos</b><button class="btn" data-a="csv">Exportar a Excel (.csv)</button><button class="btn sec" data-a="bk">Exportar Base de Datos (.json)</button><button class="btn sec" data-a="imp">Importar Base de Datos</button><input type="file" id="f" accept=".json,application/json"></div>`}
 function render(){
   document.body.dataset.theme=S.cfg.theme;
@@ -116,15 +116,34 @@ function importDB(f){
 }
 
 /* ---------- Firebase (respaldo en la nube, offline-first) ---------- */
-const UK='inv_pwa_cid';
-let CID=localStorage.getItem(UK);
-if(!CID){CID=(crypto.randomUUID?crypto.randomUUID():uid()+uid()+uid()).replace(/-/g,'');localStorage.setItem(UK,CID)}
+const UK='inv_pwa_store',JK='inv_pwa_joined';
+let STORE=localStorage.getItem(UK)||'',warned=false;
+const cleanStore=v=>v.trim().replace(/[.$#\[\]\/]/g,'_'); // caracteres no permitidos en rutas de Firebase
 let fdb=null;
 try{if(window.firebase&&firebaseConfig.databaseURL){firebase.initializeApp(firebaseConfig);fdb=firebase.database()}}catch(e){}
-function syncToFirebase(){
-  if(!fdb||!navigator.onLine)return;
+const sref=p=>fdb.ref('tiendas/'+STORE+'/'+p);
+const arr=x=>Array.isArray(x)?x:Object.values(x||{}); // Firebase omite arrays vacíos y a veces devuelve objetos
+function norm(o){ // deja los datos de Firebase listos para la app
+  if(typeof o=='string')o=JSON.parse(o);
+  o.cfg=o.cfg||{cur:'Bs.',theme:'light',ac:COL[0]};
+  o.products=arr(o.products).map(p=>({...p,lots:arr(p.lots),discs:arr(p.discs)}));
+  o.sales=arr(o.sales);
+  return o;
+}
+const fdate=t=>{const d=new Date(t),o={day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hour12:false};if(d.getFullYear()!=new Date().getFullYear())o.year='numeric';return d.toLocaleString('es',o).replace(/ de (\p{L})/u,(m,c)=>' de '+c.toUpperCase())};
+const cloudOK=()=>{if(!fdb){toast('Firebase no configurado');return false}if(!STORE){toast('Escribe el nombre de tu tienda primero');return false}if(!navigator.onLine){toast('Sin internet');return false}return true};
+function join(){ // vincula este celular: crea la tienda si es nueva; si ya existe, pide restaurar antes de sobrescribir
+  if(!fdb||!STORE||!navigator.onLine||localStorage.getItem(JK)==STORE)return;
+  sref('actual').once('value').then(sn=>{
+    if(!sn.exists()){localStorage.setItem(JK,STORE);syncToFirebase();toast('Tienda creada en la nube ☁️')}
+    else if(!warned){warned=true;toast('La tienda ya existe: restaura "Estado actual" para unirte')}
+  }).catch(()=>{});
+}
+function syncToFirebase(){ // autoguardado: sobrescribe tiendas/NOMBRE/actual
+  if(!fdb||!STORE||!navigator.onLine)return;
+  if(localStorage.getItem(JK)!=STORE)return join();
   const d=localStorage.getItem(K);if(!d)return;
-  try{fdb.ref('users/'+CID).set({data:d,t:Date.now()}).catch(()=>{})}catch(e){}
+  try{sref('actual').set({data:JSON.parse(d),t:Date.now()}).catch(()=>{})}catch(e){}
 }
 addEventListener('online',syncToFirebase);
 
@@ -201,15 +220,30 @@ delSale(v){
   },
   bk(){dl('respaldo-inventario-'+today()+'.json',JSON.stringify({...localStorage}),'application/json')},
   imp(){$('#f').click()},
-  cid(){const v=$('#cid').value.trim();if(v.length<8)return toast('El código debe tener al menos 8 caracteres');CID=v;localStorage.setItem(UK,v);toast('Código guardado')},
-  cloud(){if(!fdb)return toast('Firebase no configurado');if(!navigator.onLine)return toast('Sin internet');syncToFirebase();toast('Respaldando en la nube…')},
+  store(){const v=cleanStore($('#cid').value);if(v.length<3)return toast('Mínimo 3 caracteres');STORE=v;localStorage.setItem(UK,v);warned=false;render();toast('Tienda: '+v);join()},
+  cloud(){ // respaldo manual: NO toca "actual", crea tiendas/NOMBRE/respaldos/TIMESTAMP
+    if(!cloudOK())return;
+    const t=Date.now();
+    sref('respaldos/'+t).set({t,data:JSON.parse(localStorage.getItem(K)||JSON.stringify(S))}).then(()=>toast('Respaldo guardado ☁️')).catch(()=>toast('No se pudo respaldar'));
+  },
   restore(){
-    if(!fdb)return toast('Firebase no configurado');
-    if(!navigator.onLine)return toast('Sin internet');
-    fdb.ref('users/'+CID).once('value').then(sn=>{
-      const v=sn.val();if(!v||!v.data)return toast('No hay respaldo en la nube');
+    if(!cloudOK())return;
+    sref('respaldos').orderByKey().limitToLast(30).once('value').then(sn=>{
+      const l=Object.values(sn.val()||{}).filter(x=>x&&x.t).sort((a,b)=>b.t-a.t);
+      const info=d=>{try{const o=norm(d);return o.products.length+' productos · '+o.sales.length+' ventas'}catch{return ''}};
+      sheet(`<h2>☁️ Restaurar desde la nube</h2><p class="mut">Tienda: ${esc(STORE)}</p>
+      <div class="card"><div class="head"><div class="grow"><b>Estado actual</b><div class="mut" style="margin:0">Lo último sincronizado</div></div><button class="mini" data-a="rest1" data-v="actual">Restaurar esto</button></div></div>
+      <div class="sec-t">Respaldos manuales</div>`+
+      (l.map(x=>`<div class="card"><div class="head"><div class="grow"><b>${fdate(x.t)}</b><div class="mut" style="margin:0">${info(x.data)}</div></div><button class="mini" data-a="rest1" data-v="${x.t}">Restaurar esto</button></div></div>`).join('')||'<p class="empty">🍰 Aún no hay respaldos guardados.</p>')+
+      `<button class="btn sec" data-a="close">Cerrar</button>`);
+    }).catch(()=>toast('No se pudo leer la nube'));
+  },
+  rest1(v){
+    if(!cloudOK())return;
+    sref(v=='actual'?'actual':'respaldos/'+v).once('value').then(sn=>{
+      const o=sn.val();if(!o||!o.data)return toast('Respaldo no encontrado');
       if(!confirm('Esto reemplazará los datos de este celular. ¿Continuar?'))return;
-      localStorage.setItem(K,v.data);location.reload();
+      localStorage.setItem(K,JSON.stringify(norm(o.data)));localStorage.setItem(JK,STORE);location.reload();
     }).catch(()=>toast('No se pudo restaurar'));
   }
 };
